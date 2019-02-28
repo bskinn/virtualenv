@@ -32,7 +32,7 @@ EXTENSIONS = {"powershell": ".ps1", "cmd": ".bat"}
 
 
 @pytest.fixture(scope="module")
-def platform_check_skip():
+def platform_check_skip(tmp_path_factory):
     """Return non-empty string if tests should be skipped."""
     platform_incompat = "No sane provision for {} on {} yet"
 
@@ -48,6 +48,15 @@ def platform_check_skip():
 
         if shell == "xonsh" and sys.version_info < (3, 4):
             pytest.skip("xonsh requires Python 3.4 at least")
+
+        if shell == "powershell":
+            test_ps1 = tmp_path_factory.mktemp("posh_test") / "test.ps1"
+            test_ps1.write_text("echo foo\n")
+
+            if 0 != subprocess.call("powershell -File {}".format(str(test_ps1)), shell=True):
+                pytest.skip("powershell script execution not enabled")
+                # Enable with:  PS> Set-ExecutionPolicy -scope currentuser -ExecutionPolicy Bypass -Force;
+                # Disable with: PS> Set-ExecutionPolicy -scope currentuser -ExecutionPolicy Restricted -Force;
 
     return check
 
