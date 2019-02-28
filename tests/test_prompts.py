@@ -26,17 +26,17 @@ OUTPUT_TEMPLATE = "{0}.out.{1}.{2}"
 SHELL_LIST = ["bash", "fish", "csh", "xonsh", "cmd", "powershell"]
 
 
-def platform_check(platform, shell):
+def platform_check_skip(platform, shell):
     """Return non-empty string if tests should be skipped."""
     platform_incompat = "No sane provision for {} on {} yet"
 
     if (sys.platform.startswith("win") and shell in ["bash", "csh", "fish"]) or (
         sys.platform.startswith("linux") and shell in ["cmd", "powershell"]
     ):
-        return platform_incompat.format(shell, platform)
+        pytest.skip(platform_incompat.format(shell, platform))
 
     if shell == "xonsh" and sys.version_info < (3, 4):
-        return "xonsh requires Python 3.4 at least"
+        pytest.skip("xonsh requires Python 3.4 at least")
 
 
 @pytest.fixture(scope="module")
@@ -108,9 +108,7 @@ class TestPrompts:
 @pytest.mark.parametrize(["env", "prefix"], [(ENV_DEFAULT, PREFIX_DEFAULT), (ENV_CUSTOM, PREFIX_CUSTOM)])
 def test_activated_prompt(shell, env, prefix, tmp_root, preamble_cmds, prompt_cmds, activate_cmds):
     """Confirm prompt modification behavior with and without --prompt specified."""
-    shell_skip = platform_check(sys.platform, shell)
-    if shell_skip:
-        pytest.skip(shell_skip)
+    platform_check_skip(sys.platform, shell)
 
     script_name = SCRIPT_TEMPLATE.format(shell, "normal", env)
     output_name = OUTPUT_TEMPLATE.format(shell, "normal", env)
