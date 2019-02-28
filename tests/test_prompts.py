@@ -1,6 +1,7 @@
 """test that prompt behavior is correct in supported shells"""
 from __future__ import absolute_import, unicode_literals
 
+from collections import defaultdict
 import os
 import subprocess
 import sys
@@ -19,21 +20,19 @@ PREFIX_CUSTOM = "---ENV---"
 VIRTUAL_ENV_DISABLE_PROMPT = "VIRTUAL_ENV_DISABLE_PROMPT"
 VIRTUAL_ENV = "VIRTUAL_ENV"
 
-# {shell}.(script|out).(normal|suppress).(default|custom)[extension]
-SCRIPT_TEMPLATE = "{0}.script.{1}.{2}{3}"
-
-# {shell}.(script|out).(normal|suppress).(default|custom)
-OUTPUT_TEMPLATE = "{0}.out.{1}.{2}"
-
 SHELL_LIST = ["bash", "fish", "csh", "xonsh", "cmd", "powershell"]
-ACTIVATE_COMMANDS = {"powershell": ". ", "cmd": "call "}
-EXECUTE_COMMANDS = {"cmd": "", "powershell": "powershell -File "}
-EXTENSIONS = {"powershell": ".ps1", "cmd": ".bat"}
+
+
+class EchoDict(dict):
+    """Returns the value for the key if available, else returns the key."""
+
+    def __getitem__(self, key):
+        return self.get(key, key)
 
 
 @pytest.fixture(scope="module")
 def platform_check_skip(tmp_path_factory):
-    """Return non-empty string if tests should be skipped."""
+    """Return function triggering skip based on platform & shell."""
     platform_incompat = "No sane provision for {} on {} yet"
 
     def check(platform, shell):
@@ -72,50 +71,60 @@ def tmp_root(tmp_path_factory):
 
     _, _, _, bin_dir = virtualenv.path_locations(str(root / ENV_DEFAULT))
 
-    bin_name = os.path.split(bin_dir)[-1]
+    bin_dir_name = os.path.split(bin_dir)[-1]
 
-    return root, bin_name
-
-
-@pytest.fixture(scope="module")
-def preamble_cmds():
-    return {
-        "bash": "",
-        "fish": "",
-        "csh": "set prompt=%",
-        "xonsh": "$VIRTUAL_ENV = ''; $PROMPT = '{env_name}$ '",
-        "cmd": "@echo off & set PROMPT=$P$G",
-        "powershell": "",
-    }
+    return root, bin_dir_name
 
 
 @pytest.fixture(scope="module")
-def prompt_cmds():
-    return {
-        "bash": 'echo "$PS1"',
-        "fish": "fish_prompt; echo ' '",
-        "csh": r"set | grep -E 'prompt\s' | sed -E 's/^prompt\s+(.*)$/\1/'",
-        "xonsh": "print(__xonsh__.shell.prompt)",
-        "cmd": "echo %PROMPT%",
-        "powershell": "prompt",
-    }
+def shell_info():
+    class ShellInfo:
 
+        execute_cmds = EchoDict({"cmd": "", "powershell": "powershell -File "})
 
-@pytest.fixture(scope="module")
-def activate_scripts():
-    return {
-        "bash": "activate",
-        "fish": "activate.fish",
-        "csh": "activate.csh",
-        "xonsh": "activate.xsh",
-        "cmd": "activate.bat",
-        "powershell": "activate.ps1",
-    }
+        # {shell}.script.(normal|suppress).(default|custom)[extension]
+        script_template = "{0}.script.{1}.{2}{3}"
 
+        # {shell}.out.(normal|suppress).(default|custom)
+        output_template = "{0}.out.{1}.{2}"
 
-@pytest.fixture(scope="module")
-def deactivate_cmds():
-    return {"cmd": "call deactivate"}
+        testscript_extensions = defaultdict(lambda: "")
+        testscript_extensions.update({"powershell": ".ps1", "cmd": ".bat"})
+
+        preamble_cmds = {
+            "bash": "",
+            "fish": "",
+            "csh": "set prompt=%",
+            "xonsh": "$VIRTUAL_ENV = ''; $PROMPT = '{env_name}$ '",
+            "cmd": "@echo off & set PROMPT=$P$G",
+            "powershell": "",
+        }
+
+        prompt_cmds = {
+            "bash": 'echo "$PS1"',
+            "fish": "fish_prompt; echo ' '",
+            "csh": r"set | grep -E 'prompt\s' | sed -E 's/^prompt\s+(.*)$/\1/'",
+            "xonsh": "print(__xonsh__.shell.prompt)",
+            "cmd": "echo %PROMPT%",
+            "powershell": "prompt",
+        }
+
+        activate_cmds = defaultdict(lambda: "source ")
+        activate_cmds.update({"powershell": ". ", "cmd": "call "})
+
+        activate_scripts = {
+            "bash": "activate",
+            "fish": "activate.fish",
+            "csh": "activate.csh",
+            "xonsh": "activate.xsh",
+            "cmd": "activate.bat",
+            "powershell": "activate.ps1",
+        }
+
+        deactivate_cmds = defaultdict(lambda: "deactivate")
+        deactivate_cmds.update({"cmd": "call deactivate"})
+
+    return ShellInfo()
 
 
 @pytest.fixture(scope="function")
@@ -132,18 +141,14 @@ def test_exit_code(command, code, tmp_root):
 
 @pytest.mark.parametrize("shell", SHELL_LIST)
 @pytest.mark.parametrize("env", [ENV_DEFAULT, ENV_CUSTOM])
-def test_suppressed_prompt(
-    shell, env, tmp_root, clean_env, preamble_cmds, prompt_cmds, activate_scripts, platform_check_skip
-):
+def test_suppressed_prompt(shell, env, tmp_root, clean_env, shell_info, platform_check_skip):
     """Confirm VIRTUAL_ENV_DISABLE_PROMPT suppresses prompt changes on activate."""
     platform_check_skip(sys.platform, shell)
 
-    script_name = SCRIPT_TEMPLATE.format(shell, "suppress", env, EXTENSIONS.get(shell, ""))
-    output_name = OUTPUT_TEMPLATE.format(shell, "suppress", env)
+    script_name = shell_info.script_template.format(shell, "suppress", env, shell_info.testscript_extensions[shell])
+    output_name = shell_info.output_template.format(shell, "suppress", env)
 
     clean_env.update({VIRTUAL_ENV_DISABLE_PROMPT: "1"})
-
-    activate = ACTIVATE_COMMANDS.get(shell, "source ")
 
     # The "echo foo" here copes with some oddity of xonsh in certain emulated terminal
     # contexts: xonsh can dump stuff into the first line of the recorded script output,
@@ -154,20 +159,20 @@ def test_suppressed_prompt(
         {preamble}
         echo foo
         {prompt}
-        {activate}{env}/{bindir}/{act_script}
+        {act_cmd}{env}/{bindir}/{act_script}
         {prompt}
     """.format(
                 env=env,
-                activate=activate,
-                preamble=preamble_cmds[shell],
-                prompt=prompt_cmds[shell],
-                act_script=activate_scripts[shell],
+                act_cmd=shell_info.activate_cmds[shell],
+                preamble=shell_info.preamble_cmds[shell],
+                prompt=shell_info.prompt_cmds[shell],
+                act_script=shell_info.activate_scripts[shell],
                 bindir=tmp_root[1],
             )
         )
     )
 
-    command = "{0} {1} > {2}".format(EXECUTE_COMMANDS.get(shell, shell), script_name, output_name)
+    command = "{0} {1} > {2}".format(shell_info.execute_cmds[shell], script_name, output_name)
 
     assert 0 == subprocess.call(command, cwd=str(tmp_root[0]), shell=True, env=clean_env)
 
@@ -179,16 +184,12 @@ def test_suppressed_prompt(
 
 @pytest.mark.parametrize("shell", SHELL_LIST)
 @pytest.mark.parametrize(["env", "prefix"], [(ENV_DEFAULT, PREFIX_DEFAULT), (ENV_CUSTOM, PREFIX_CUSTOM)])
-def test_activated_prompt(
-    shell, env, prefix, tmp_root, preamble_cmds, prompt_cmds, activate_scripts, deactivate_cmds, platform_check_skip
-):
+def test_activated_prompt(shell, env, prefix, tmp_root, shell_info, platform_check_skip):
     """Confirm prompt modification behavior with and without --prompt specified."""
     platform_check_skip(sys.platform, shell)
 
-    script_name = SCRIPT_TEMPLATE.format(shell, "normal", env, EXTENSIONS.get(shell, ""))
-    output_name = OUTPUT_TEMPLATE.format(shell, "normal", env)
-
-    activate = ACTIVATE_COMMANDS.get(shell, "source ")
+    script_name = shell_info.script_template.format(shell, "normal", env, shell_info.testscript_extensions[shell])
+    output_name = shell_info.output_template.format(shell, "normal", env)
 
     # The "echo foo" here copes with some oddity of xonsh in certain emulated terminal
     # contexts: xonsh can dump stuff into the first line of the recorded script output,
@@ -199,23 +200,23 @@ def test_activated_prompt(
         {preamble}
         echo foo
         {prompt}
-        {activate}{env}/{bindir}/{act_script}
+        {act_cmd}{env}/{bindir}/{act_script}
         {prompt}
         {deactivate}
         {prompt}
         """.format(
                 env=env,
-                activate=activate,
-                deactivate=deactivate_cmds.get(shell, "deactivate"),
-                preamble=preamble_cmds[shell],
-                prompt=prompt_cmds[shell],
-                act_script=activate_scripts[shell],
+                act_cmd=shell_info.activate_cmds[shell],
+                deactivate=shell_info.deactivate_cmds[shell],
+                preamble=shell_info.preamble_cmds[shell],
+                prompt=shell_info.prompt_cmds[shell],
+                act_script=shell_info.activate_scripts[shell],
                 bindir=tmp_root[1],
             )
         )
     )
 
-    command = "{0} {1} > {2}".format(EXECUTE_COMMANDS.get(shell, shell), script_name, output_name)
+    command = "{0} {1} > {2}".format(shell_info.execute_cmds[shell], script_name, output_name)
 
     assert 0 == subprocess.call(command, cwd=str(tmp_root[0]), shell=True)
 
@@ -234,6 +235,8 @@ def test_activated_prompt(
     # Separate handling for fish, which has color coding commands built into activate.fish that are
     # painful to work around
     if shell == "fish":
+        # Looser assert
         assert lines[1] in after, lines
     else:
+        # Stricter assert
         assert after == lines[1], lines
