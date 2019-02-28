@@ -55,7 +55,7 @@ def tmp_root(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def preamble_cmds():
-    return {"bash": "", "fish": "", "csh": "set prompt=%", "xonsh": "$PROMPT = '{env_name}$ '"}
+    return {"bash": "", "fish": "", "csh": "set prompt=%", "xonsh": "$VIRTUAL_ENV = ''; $PROMPT = '{env_name}$ '"}
 
 
 @pytest.fixture(scope="module")
@@ -124,6 +124,7 @@ def test_activated_prompt(shell, env, prefix, tmp_root, preamble_cmds, prompt_cm
         dedent(
             """\
         {preamble}
+        echo foo
         {prompt}
         {command}{env}/{bindir}/{act}
         {prompt}
@@ -147,9 +148,9 @@ def test_activated_prompt(shell, env, prefix, tmp_root, preamble_cmds, prompt_cm
     lines = (tmp_root[0] / output_name).read_bytes().split(b"\n")
 
     # Before activation and after deactivation
-    assert lines[0] == lines[2], lines
+    assert lines[1] == lines[3], lines
 
     # Activated prompt. This construction copes with messes like fish's ANSI codes
-    before, env_marker, after = lines[1].partition(prefix.encode("utf-8"))
+    before, env_marker, after = lines[2].partition(prefix.encode("utf-8"))
     assert env_marker != b"", lines
-    assert lines[0] in after, lines
+    assert lines[1] in after, lines
