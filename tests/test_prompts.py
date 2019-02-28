@@ -133,12 +133,6 @@ def clean_env():
     return os.environ.copy()
 
 
-@pytest.mark.parametrize(["command", "code"], [("echo test", 0), ("exit 1", 1)])
-def test_exit_code(command, code, tmp_root):
-    """Confirm subprocess.call exit codes work as expected at the unit test level."""
-    assert subprocess.call(command, cwd=str(tmp_root[0]), shell=True) == code
-
-
 @pytest.mark.parametrize("shell", SHELL_LIST)
 @pytest.mark.parametrize("env", [ENV_DEFAULT, ENV_CUSTOM])
 def test_suppressed_prompt(shell, env, tmp_root, clean_env, shell_info, platform_check_skip):
