@@ -24,6 +24,7 @@ SCRIPT_TEMPLATE = "{0}.script.{1}.{2}"
 OUTPUT_TEMPLATE = "{0}.out.{1}.{2}"
 
 SHELL_LIST = ["bash", "fish", "csh", "xonsh", "cmd", "powershell"]
+COMMANDS = {"powershell": ". ", "cmd": ""}
 
 
 def platform_check_skip(platform, shell):
@@ -87,21 +88,49 @@ def test_exit_code(command, code, tmp_root):
     assert subprocess.call(command, cwd=str(tmp_root[0]), shell=True) == code
 
 
-@pytest.mark.skipif(sys.platform.startswith("win"), reason="Invalid on Windows")
-class TestPrompts:
-    """Container for tests of bash prompt modifications."""
+@pytest.mark.parametrize("shell", SHELL_LIST)
+@pytest.mark.parametrize("env", [ENV_DEFAULT, ENV_CUSTOM])
+def test_suppressed_prompt(shell, env, tmp_root, clean_env, preamble_cmds, prompt_cmds, activate_cmds):
+    """Confirm VIRTUAL_ENV_DISABLE_PROMPT suppresses prompt changes on activate."""
+    platform_check_skip(sys.platform, shell)
 
-    @staticmethod
-    @pytest.mark.skip("Not updated yet")
-    def test_suppressed_prompt_default_env(tmp_root, clean_env):
-        """Confirm VIRTUAL_ENV_DISABLE_PROMPT suppresses prompt changes on activate."""
-        clean_env.update({VIRTUAL_ENV_DISABLE_PROMPT: "1"})
-        command = 'echo "$PS1" > {1} && . {0}/bin/activate && echo "$PS1" >> {1}'.format(ENV_DEFAULT, OUTPUT_FILE)
+    script_name = SCRIPT_TEMPLATE.format(shell, "suppress", env)
+    output_name = OUTPUT_TEMPLATE.format(shell, "suppress", env)
 
-        assert 0 == subprocess.call(command, cwd=str(tmp_root[0]), shell=True, env=clean_env)
+    clean_env.update({VIRTUAL_ENV_DISABLE_PROMPT: "1"})
 
-        lines = (tmp_root[0] / OUTPUT_FILE).read_bytes().split(b"\n")
-        assert lines[0] == lines[1]
+    command = COMMANDS.get(shell, "source ")
+
+    # The "echo foo" here copes with some oddity of xonsh in certain emulated terminal
+    # contexts: xonsh can dump stuff into the first line of the recorded script output,
+    # so we have to include a dummy line of output that can get munged w/o consequence.
+    (tmp_root[0] / script_name).write_text(
+        dedent(
+            """\
+        {preamble}
+        echo foo
+        {prompt}
+        {command}{env}/{bindir}/{act}
+        {prompt}
+    """.format(
+                env=env,
+                command=command,
+                preamble=preamble_cmds[shell],
+                prompt=prompt_cmds[shell],
+                act=activate_cmds[shell],
+                bindir=tmp_root[1],
+            )
+        )
+    )
+
+    command = "{0} {1} > {2}".format(shell, script_name, output_name)
+
+    assert 0 == subprocess.call(command, cwd=str(tmp_root[0]), shell=True, env=clean_env)
+
+    lines = (tmp_root[0] / output_name).read_bytes().split(b"\n")
+
+    # Is the prompt suppressed?
+    assert lines[1] == lines[2], lines
 
 
 @pytest.mark.parametrize("shell", SHELL_LIST)
@@ -113,13 +142,11 @@ def test_activated_prompt(shell, env, prefix, tmp_root, preamble_cmds, prompt_cm
     script_name = SCRIPT_TEMPLATE.format(shell, "normal", env)
     output_name = OUTPUT_TEMPLATE.format(shell, "normal", env)
 
-    if shell == "cmd":
-        command = ""
-    elif shell == "powershell":
-        command = ". "
-    else:
-        command = "source "
+    command = COMMANDS.get(shell, "source ")
 
+    # The "echo foo" here copes with some oddity of xonsh in certain emulated terminal
+    # contexts: xonsh can dump stuff into the first line of the recorded script output,
+    # so we have to include a dummy line of output that can get munged w/o consequence.
     (tmp_root[0] / script_name).write_text(
         dedent(
             """\
@@ -150,7 +177,9 @@ def test_activated_prompt(shell, env, prefix, tmp_root, preamble_cmds, prompt_cm
     # Before activation and after deactivation
     assert lines[1] == lines[3], lines
 
-    # Activated prompt. This construction copes with messes like fish's ANSI codes
+    # Activated prompt. This construction copes with messes like fish's ANSI codes for colorizing.
+    # It's not as rigorous as I would like, but it provides assurance to the key pieces
+    # of content that should be present.
     before, env_marker, after = lines[2].partition(prefix.encode("utf-8"))
     assert env_marker != b"", lines
     assert lines[1] in after, lines
