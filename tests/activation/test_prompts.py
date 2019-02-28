@@ -1,10 +1,10 @@
 """test that prompt behavior is correct in supported shells"""
 from __future__ import absolute_import, unicode_literals
 
-from collections import defaultdict
 import os
 import subprocess
 import sys
+from collections import defaultdict
 from textwrap import dedent
 
 import pytest
@@ -166,7 +166,7 @@ def test_suppressed_prompt(shell, env, tmp_root, clean_env, shell_info, platform
         )
     )
 
-    command = "{0} {1} > {2}".format(shell_info.execute_cmds[shell], script_name, output_name)
+    command = "{} {} > {}".format(shell_info.execute_cmds[shell], script_name, output_name)
 
     assert 0 == subprocess.call(command, cwd=str(tmp_root[0]), shell=True, env=clean_env)
 
@@ -210,7 +210,7 @@ def test_activated_prompt(shell, env, prefix, tmp_root, shell_info, platform_che
         )
     )
 
-    command = "{0} {1} > {2}".format(shell_info.execute_cmds[shell], script_name, output_name)
+    command = "{} {} > {}".format(shell_info.execute_cmds[shell], script_name, output_name)
 
     assert 0 == subprocess.call(command, cwd=str(tmp_root[0]), shell=True)
 
