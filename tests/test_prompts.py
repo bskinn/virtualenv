@@ -23,6 +23,8 @@ VIRTUAL_ENV = "VIRTUAL_ENV"
 SCRIPT_TEMPLATE = "{0}.script.{1}.{2}"
 OUTPUT_TEMPLATE = "{0}.out.{1}.{2}"
 
+SHELL_LIST = ["bash", "fish", "csh", "xonsh", "cmd", "powershell"]
+
 
 def platform_check(platform, shell):
     """Return non-empty string if tests should be skipped."""
@@ -102,7 +104,7 @@ class TestPrompts:
         assert lines[0] == lines[1]
 
 
-@pytest.mark.parametrize("shell", ["bash", "fish", "csh", "xonsh", "cmd", "powershell"])
+@pytest.mark.parametrize("shell", SHELL_LIST)
 @pytest.mark.parametrize(["env", "prefix"], [(ENV_DEFAULT, PREFIX_DEFAULT), (ENV_CUSTOM, PREFIX_CUSTOM)])
 def test_activated_prompt(shell, env, prefix, tmp_root, preamble_cmds, prompt_cmds, activate_cmds):
     """Confirm prompt modification behavior with and without --prompt specified."""
