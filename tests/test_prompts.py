@@ -4,6 +4,7 @@ from __future__ import absolute_import, unicode_literals
 import os
 import subprocess
 import sys
+from textwrap import dedent
 
 import pytest
 
@@ -27,13 +28,12 @@ def platform_check(platform, shell):
     """Return non-empty string if tests should be skipped."""
     platform_incompat = "No sane provision for {} on {} yet"
 
-    if (
-        (sys.platform.startswith("win") and shell in ['bash', 'csh', 'fish'])
-       or (sys.platform.startswith("linux") and shell in ['cmd', 'powershell'])
+    if (sys.platform.startswith("win") and shell in ["bash", "csh", "fish"]) or (
+        sys.platform.startswith("linux") and shell in ["cmd", "powershell"]
     ):
         return platform_incompat.format(shell, platform)
 
-    if shell == 'xonsh' and sys.version_info < (3, 4):
+    if shell == "xonsh" and sys.version_info < (3, 4):
         return "xonsh requires Python 3.4 at least"
 
 
@@ -45,20 +45,32 @@ def tmp_root(tmp_path_factory):
     virtualenv.create_environment(
         str(root / ENV_CUSTOM), prompt=PREFIX_CUSTOM, no_setuptools=True, no_pip=True, no_wheel=True
     )
-    return root
+
+    _, _, _, bin_dir = virtualenv.path_locations(str(root / ENV_DEFAULT))
+
+    bin_name = os.path.split(bin_dir)[-1]
+
+    return root, bin_name
+
+
+@pytest.fixture(scope="module")
+def preamble_cmds():
+    return {"bash": "", "fish": "", "csh": "set prompt=%", "xonsh": "$PROMPT = '{env_name}$ '"}
 
 
 @pytest.fixture(scope="module")
 def prompt_cmds():
     return {
         "bash": 'echo "$PS1"',
+        "fish": "fish_prompt; echo ' '",
+        "csh": r"set | grep -E 'prompt\s' | sed -E 's/^prompt\s+(.*)$/\1/'",
+        "xonsh": "print(__xonsh__.shell.prompt)",
     }
+
 
 @pytest.fixture(scope="module")
 def activate_cmds():
-    return {
-        "bash": "activate",
-    }
+    return {"bash": "activate", "fish": "activate.fish", "csh": "activate.csh", "xonsh": "activate.xsh"}
 
 
 @pytest.fixture(scope="function")
@@ -70,7 +82,7 @@ def clean_env():
 @pytest.mark.parametrize(["command", "code"], [("echo test", 0), ("exit 1", 1)])
 def test_exit_code(command, code, tmp_root):
     """Confirm subprocess.call exit codes work as expected at the unit test level."""
-    assert subprocess.call(command, cwd=str(tmp_root), shell=True) == code
+    assert subprocess.call(command, cwd=str(tmp_root[0]), shell=True) == code
 
 
 @pytest.mark.skipif(sys.platform.startswith("win"), reason="Invalid on Windows")
@@ -84,44 +96,60 @@ class TestPrompts:
         clean_env.update({VIRTUAL_ENV_DISABLE_PROMPT: "1"})
         command = 'echo "$PS1" > {1} && . {0}/bin/activate && echo "$PS1" >> {1}'.format(ENV_DEFAULT, OUTPUT_FILE)
 
-        assert 0 == subprocess.call(command, cwd=str(tmp_root), shell=True, env=clean_env)
+        assert 0 == subprocess.call(command, cwd=str(tmp_root[0]), shell=True, env=clean_env)
 
-        lines = (tmp_root / OUTPUT_FILE).read_bytes().split(b"\n")
+        lines = (tmp_root[0] / OUTPUT_FILE).read_bytes().split(b"\n")
         assert lines[0] == lines[1]
 
-@pytest.mark.parametrize('shell', ['bash'])
+
+@pytest.mark.parametrize("shell", ["bash", "fish", "csh", "xonsh", "cmd", "powershell"])
 @pytest.mark.parametrize(["env", "prefix"], [(ENV_DEFAULT, PREFIX_DEFAULT), (ENV_CUSTOM, PREFIX_CUSTOM)])
-def test_activated_prompt(shell, env, prefix, tmp_root, prompt_cmds, activate_cmds):
+def test_activated_prompt(shell, env, prefix, tmp_root, preamble_cmds, prompt_cmds, activate_cmds):
     """Confirm prompt modification behavior with and without --prompt specified."""
     shell_skip = platform_check(sys.platform, shell)
     if shell_skip:
         pytest.skip(shell_skip)
 
-    script_name = SCRIPT_TEMPLATE.format(shell, 'normal', env)
-    output_name = OUTPUT_TEMPLATE.format(shell, 'normal', env)
+    script_name = SCRIPT_TEMPLATE.format(shell, "normal", env)
+    output_name = OUTPUT_TEMPLATE.format(shell, "normal", env)
 
-    (tmp_root / script_name).write_text("""\
-        {1}
-        . {0}/bin/{2}
-        {1}
+    if shell == "cmd":
+        command = ""
+    elif shell == "powershell":
+        command = ". "
+    else:
+        command = "source "
+
+    (tmp_root[0] / script_name).write_text(
+        dedent(
+            """\
+        {preamble}
+        {prompt}
+        {command}{env}/{bindir}/{act}
+        {prompt}
         deactivate
-        {1}
-        """.format(env, prompt_cmds[shell], activate_cmds[shell]))
+        {prompt}
+        """.format(
+                env=env,
+                command=command,
+                preamble=preamble_cmds[shell],
+                prompt=prompt_cmds[shell],
+                act=activate_cmds[shell],
+                bindir=tmp_root[1],
+            )
+        )
+    )
 
-    command = '{0} {1} > {2}'.format(shell, script_name, output_name)
+    command = "{0} {1} > {2}".format(shell, script_name, output_name)
 
-    #~ command = (
-        #~ 'bash -ci \'echo "$PS1" > {1} && . {0}/bin/activate && echo "$PS1" >> {1} && deactivate && echo "$PS1" >> {1}\''
-    #~ ).format(env, OUTPUT_FILE)
+    assert 0 == subprocess.call(command, cwd=str(tmp_root[0]), shell=True)
 
-    assert 0 == subprocess.call(command, cwd=str(tmp_root), shell=True)
-
-    lines = (tmp_root / output_name).read_bytes().split(b"\n")
+    lines = (tmp_root[0] / output_name).read_bytes().split(b"\n")
 
     # Before activation and after deactivation
-    assert lines[0] == lines[2]
+    assert lines[0] == lines[2], lines
 
-    # Activated prompt
-    assert lines[1] == prefix.encode("utf-8") + lines[0]
-
-
+    # Activated prompt. This construction copes with messes like fish's ANSI codes
+    before, env_marker, after = lines[1].partition(prefix.encode("utf-8"))
+    assert env_marker != b"", lines
+    assert lines[0] in after, lines
