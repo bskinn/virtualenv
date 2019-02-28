@@ -212,4 +212,10 @@ def test_activated_prompt(shell, env, prefix, tmp_root, preamble_cmds, prompt_cm
     # to the key pieces of content that should be present.
     before, env_marker, after = lines[2].partition(prefix.encode("utf-8"))
     assert env_marker != b"", lines
-    assert lines[1] in after, lines
+
+    # Separate handling for fish, which has color coding commands built into activate.fish that are
+    # painful to work around
+    if shell == "fish":
+        assert lines[1] in after, lines
+    else:
+        assert after == lines[1]
