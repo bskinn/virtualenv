@@ -31,20 +31,25 @@ EXECUTE_COMMANDS = {"cmd": "", "powershell": "powershell -File "}
 EXTENSIONS = {"powershell": ".ps1", "cmd": ".bat"}
 
 
-def platform_check_skip(platform, shell):
+@pytest.fixture(scope="module")
+def platform_check_skip():
     """Return non-empty string if tests should be skipped."""
     platform_incompat = "No sane provision for {} on {} yet"
 
-    if (sys.platform.startswith("win") and shell in ["bash", "csh", "fish"]) or (
-        sys.platform.startswith("linux") and shell in ["cmd", "powershell"]
-    ):
-        pytest.skip(platform_incompat.format(shell, platform))
+    def check(platform, shell):
 
-    if sys.platform.startswith("win") and shell == "xonsh":
-        pytest.skip("Provisioning xonsh on windows is unreliable")
+        if (sys.platform.startswith("win") and shell in ["bash", "csh", "fish"]) or (
+            sys.platform.startswith("linux") and shell in ["cmd", "powershell"]
+        ):
+            pytest.skip(platform_incompat.format(shell, platform))
 
-    if shell == "xonsh" and sys.version_info < (3, 4):
-        pytest.skip("xonsh requires Python 3.4 at least")
+        if sys.platform.startswith("win") and shell == "xonsh":
+            pytest.skip("Provisioning xonsh on windows is unreliable")
+
+        if shell == "xonsh" and sys.version_info < (3, 4):
+            pytest.skip("xonsh requires Python 3.4 at least")
+
+    return check
 
 
 @pytest.fixture(scope="module")
@@ -118,7 +123,9 @@ def test_exit_code(command, code, tmp_root):
 
 @pytest.mark.parametrize("shell", SHELL_LIST)
 @pytest.mark.parametrize("env", [ENV_DEFAULT, ENV_CUSTOM])
-def test_suppressed_prompt(shell, env, tmp_root, clean_env, preamble_cmds, prompt_cmds, activate_scripts):
+def test_suppressed_prompt(
+    shell, env, tmp_root, clean_env, preamble_cmds, prompt_cmds, activate_scripts, platform_check_skip
+):
     """Confirm VIRTUAL_ENV_DISABLE_PROMPT suppresses prompt changes on activate."""
     platform_check_skip(sys.platform, shell)
 
@@ -163,7 +170,9 @@ def test_suppressed_prompt(shell, env, tmp_root, clean_env, preamble_cmds, promp
 
 @pytest.mark.parametrize("shell", SHELL_LIST)
 @pytest.mark.parametrize(["env", "prefix"], [(ENV_DEFAULT, PREFIX_DEFAULT), (ENV_CUSTOM, PREFIX_CUSTOM)])
-def test_activated_prompt(shell, env, prefix, tmp_root, preamble_cmds, prompt_cmds, activate_scripts, deactivate_cmds):
+def test_activated_prompt(
+    shell, env, prefix, tmp_root, preamble_cmds, prompt_cmds, activate_scripts, deactivate_cmds, platform_check_skip
+):
     """Confirm prompt modification behavior with and without --prompt specified."""
     platform_check_skip(sys.platform, shell)
 
@@ -218,4 +227,4 @@ def test_activated_prompt(shell, env, prefix, tmp_root, preamble_cmds, prompt_cm
     if shell == "fish":
         assert lines[1] in after, lines
     else:
-        assert after == lines[1]
+        assert after == lines[1], lines
