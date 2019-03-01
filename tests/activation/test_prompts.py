@@ -144,14 +144,14 @@ def test_suppressed_prompt(shell, env, tmp_root, clean_env, shell_info, platform
 
     clean_env.update({VIRTUAL_ENV_DISABLE_PROMPT: "1"})
 
-    # The "echo foo" here copes with some oddity of xonsh in certain emulated terminal
+    # The extra "{prompt}" here copes with some oddity of xonsh in certain emulated terminal
     # contexts: xonsh can dump stuff into the first line of the recorded script output,
     # so we have to include a dummy line of output that can get munged w/o consequence.
     (tmp_root[0] / script_name).write_text(
         dedent(
             """\
         {preamble}
-        echo foo
+        {prompt}
         {prompt}
         {act_cmd}{env}/{bindir}/{act_script}
         {prompt}
@@ -185,14 +185,14 @@ def test_activated_prompt(shell, env, prefix, tmp_root, shell_info, platform_che
     script_name = shell_info.script_template.format(shell, "normal", env, shell_info.testscript_extensions[shell])
     output_name = shell_info.output_template.format(shell, "normal", env)
 
-    # The "echo foo" here copes with some oddity of xonsh in certain emulated terminal
+    # The extra "{prompt}" here copes with some oddity of xonsh in certain emulated terminal
     # contexts: xonsh can dump stuff into the first line of the recorded script output,
     # so we have to include a dummy line of output that can get munged w/o consequence.
     (tmp_root[0] / script_name).write_text(
         dedent(
             """\
         {preamble}
-        echo foo
+        {prompt}
         {prompt}
         {act_cmd}{env}/{bindir}/{act_script}
         {prompt}
