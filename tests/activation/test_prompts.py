@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 from collections import defaultdict
+from pathlib import Path
 from textwrap import dedent
 
 import pytest
@@ -61,10 +62,9 @@ def platform_check_skip(tmp_path_factory):
 
 
 @pytest.fixture(scope="module")
-def tmp_root(tmp_path_factory):
+def custom_prompt_root(tmp_path_factory):
     """Provide Path to root with default and custom venvs created."""
-    root = tmp_path_factory.mktemp("env_root")
-    virtualenv.create_environment(str(root / ENV_DEFAULT), no_setuptools=True, no_pip=True, no_wheel=True)
+    root = tmp_path_factory.mktemp("custom_prompt")
     virtualenv.create_environment(
         str(root / ENV_CUSTOM), prompt=PREFIX_CUSTOM, no_setuptools=True, no_pip=True, no_wheel=True
     )
@@ -74,6 +74,27 @@ def tmp_root(tmp_path_factory):
     bin_dir_name = os.path.split(bin_dir)[-1]
 
     return root, bin_dir_name
+
+
+@pytest.fixture(scope="module")
+def clean_python_root(clean_python):
+    root = Path(clean_python[0]).resolve().parent
+    bin_dir_name = os.path.split(clean_python[1])[-1]
+
+    return root, bin_dir_name
+
+
+@pytest.fixture(scope="module")
+def get_work_root(clean_python_root, custom_prompt_root):
+    def pick_root(env):
+        if env == ENV_DEFAULT:
+            return clean_python_root
+        elif env == ENV_CUSTOM:
+            return custom_prompt_root
+        else:
+            raise ValueError("Invalid test environment")
+
+    return pick_root
 
 
 @pytest.fixture(scope="module")
@@ -135,7 +156,7 @@ def clean_env():
 
 @pytest.mark.parametrize("shell", SHELL_LIST)
 @pytest.mark.parametrize("env", [ENV_DEFAULT, ENV_CUSTOM])
-def test_suppressed_prompt(shell, env, tmp_root, clean_env, shell_info, platform_check_skip):
+def test_suppressed_prompt(shell, env, get_work_root, clean_env, shell_info, platform_check_skip):
     """Confirm VIRTUAL_ENV_DISABLE_PROMPT suppresses prompt changes on activate."""
     platform_check_skip(sys.platform, shell)
 
@@ -144,10 +165,12 @@ def test_suppressed_prompt(shell, env, tmp_root, clean_env, shell_info, platform
 
     clean_env.update({VIRTUAL_ENV_DISABLE_PROMPT: "1"})
 
+    work_root = get_work_root(env)
+
     # The extra "{prompt}" here copes with some oddity of xonsh in certain emulated terminal
     # contexts: xonsh can dump stuff into the first line of the recorded script output,
     # so we have to include a dummy line of output that can get munged w/o consequence.
-    (tmp_root[0] / script_name).write_text(
+    (work_root[0] / script_name).write_text(
         dedent(
             """\
         {preamble}
@@ -161,16 +184,16 @@ def test_suppressed_prompt(shell, env, tmp_root, clean_env, shell_info, platform
                 preamble=shell_info.preamble_cmds[shell],
                 prompt=shell_info.prompt_cmds[shell],
                 act_script=shell_info.activate_scripts[shell],
-                bindir=tmp_root[1],
+                bindir=work_root[1],
             )
         )
     )
 
     command = "{} {} > {}".format(shell_info.execute_cmds[shell], script_name, output_name)
 
-    assert 0 == subprocess.call(command, cwd=str(tmp_root[0]), shell=True, env=clean_env)
+    assert 0 == subprocess.call(command, cwd=str(work_root[0]), shell=True, env=clean_env)
 
-    lines = (tmp_root[0] / output_name).read_bytes().split(b"\n")
+    lines = (work_root[0] / output_name).read_bytes().split(b"\n")
 
     # Is the prompt suppressed?
     assert lines[1] == lines[2], lines
@@ -178,17 +201,19 @@ def test_suppressed_prompt(shell, env, tmp_root, clean_env, shell_info, platform
 
 @pytest.mark.parametrize("shell", SHELL_LIST)
 @pytest.mark.parametrize(["env", "prefix"], [(ENV_DEFAULT, PREFIX_DEFAULT), (ENV_CUSTOM, PREFIX_CUSTOM)])
-def test_activated_prompt(shell, env, prefix, tmp_root, shell_info, platform_check_skip):
+def test_activated_prompt(shell, env, prefix, get_work_root, shell_info, platform_check_skip):
     """Confirm prompt modification behavior with and without --prompt specified."""
     platform_check_skip(sys.platform, shell)
 
     script_name = shell_info.script_template.format(shell, "normal", env, shell_info.testscript_extensions[shell])
     output_name = shell_info.output_template.format(shell, "normal", env)
 
+    work_root = get_work_root(env)
+
     # The extra "{prompt}" here copes with some oddity of xonsh in certain emulated terminal
     # contexts: xonsh can dump stuff into the first line of the recorded script output,
     # so we have to include a dummy line of output that can get munged w/o consequence.
-    (tmp_root[0] / script_name).write_text(
+    (work_root[0] / script_name).write_text(
         dedent(
             """\
         {preamble}
@@ -205,16 +230,16 @@ def test_activated_prompt(shell, env, prefix, tmp_root, shell_info, platform_che
                 preamble=shell_info.preamble_cmds[shell],
                 prompt=shell_info.prompt_cmds[shell],
                 act_script=shell_info.activate_scripts[shell],
-                bindir=tmp_root[1],
+                bindir=work_root[1],
             )
         )
     )
 
     command = "{} {} > {}".format(shell_info.execute_cmds[shell], script_name, output_name)
 
-    assert 0 == subprocess.call(command, cwd=str(tmp_root[0]), shell=True)
+    assert 0 == subprocess.call(command, cwd=str(work_root[0]), shell=True)
 
-    lines = (tmp_root[0] / output_name).read_bytes().split(b"\n")
+    lines = (work_root[0] / output_name).read_bytes().split(b"\n")
 
     # Before activation and after deactivation
     assert lines[1] == lines[3], lines
