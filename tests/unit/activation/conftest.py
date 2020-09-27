@@ -84,7 +84,7 @@ class ActivationTester(object):
         invoke, env = self._invoke_script + [ensure_text(str(test_script))], self.env(tmp_path)
 
         try:
-            process = Popen(invoke, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+            process = Popen(" ".join(invoke), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, shell=True)
             _raw, _ = process.communicate()
             raw = _raw.decode("utf-8")
         except subprocess.CalledProcessError as exception:
